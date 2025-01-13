@@ -2,7 +2,7 @@
 
 # WireGuard Core Module (wireguard-core.sh)
 # This module provides core functionality for WireGuard VPN management
-# It includes essential functions used across all other modules
+# with enhanced error handling and robust dependency management
 
 # Standard color codes for script output
 RED='\033[0;31m'
@@ -10,7 +10,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
-# Critical system paths
+# Critical system paths with security considerations
 WG_CONFIG_DIR="/etc/wireguard"
 WG_KEY_DIR="${WG_CONFIG_DIR}/keys"
 WG_LOG_DIR="/var/log/wireguard"
@@ -21,7 +21,7 @@ DEFAULT_SERVER_PORT=51820
 DEFAULT_MTU=1420
 DEFAULT_KEEPALIVE=25
 
-# Initialize all required directories
+# Initialize all required directories with proper permissions
 function init_directories() {
     local dirs=(
         "$WG_CONFIG_DIR"
@@ -122,25 +122,49 @@ function validate_system() {
     fi
 }
 
-# Enhanced dependency installation with version checking
+# Enhanced dependency installation with verification
 function install_dependencies() {
     source /etc/os-release
     local packages=()
     
     case $ID in
         ubuntu|debian)
-            apt-get update
+            if ! apt-get update; then
+                log_message "ERROR" "Failed to update package lists"
+                return 1
+            fi
             packages=("wireguard" "wireguard-tools" "iptables" "qrencode")
-            apt-get install -y "${packages[@]}"
+            if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing "${packages[@]}"; then
+                log_message "WARNING" "Initial package installation had issues, verifying installation..."
+                if ! verify_package_installation "${packages[@]}"; then
+                    log_message "ERROR" "Failed to verify package installation"
+                    return 1
+                fi
+            fi
             ;;
         fedora)
             packages=("wireguard-tools" "iptables" "qrencode")
-            dnf install -y "${packages[@]}"
+            if ! dnf install -y "${packages[@]}"; then
+                log_message "WARNING" "Initial package installation had issues, verifying installation..."
+                if ! verify_package_installation "${packages[@]}"; then
+                    log_message "ERROR" "Failed to verify package installation"
+                    return 1
+                fi
+            fi
             ;;
         centos|rocky|almalinux)
-            dnf install -y epel-release
+            if ! dnf install -y epel-release; then
+                log_message "ERROR" "Failed to install EPEL repository"
+                return 1
+            fi
             packages=("wireguard-tools" "iptables" "qrencode")
-            dnf install -y "${packages[@]}"
+            if ! dnf install -y "${packages[@]}"; then
+                log_message "WARNING" "Initial package installation had issues, verifying installation..."
+                if ! verify_package_installation "${packages[@]}"; then
+                    log_message "ERROR" "Failed to verify package installation"
+                    return 1
+                fi
+            fi
             ;;
         *)
             log_message "ERROR" "Unsupported package manager"
@@ -148,16 +172,48 @@ function install_dependencies() {
             ;;
     esac
     
-    # Verify installations
-    local missing=()
+    # Verify binary availability as additional safety check
+    local missing_binaries=()
     for pkg in "${packages[@]}"; do
         if ! command -v "$pkg" &>/dev/null; then
-            missing+=("$pkg")
+            missing_binaries+=("$pkg")
         fi
     done
     
+    if [[ ${#missing_binaries[@]} -gt 0 ]]; then
+        log_message "ERROR" "Required binaries not found after installation: ${missing_binaries[*]}"
+        return 1
+    fi
+    
+    log_message "SUCCESS" "All required packages installed and verified"
+    return 0
+}
+
+# Verify package installation status
+function verify_package_installation() {
+    local missing=()
+    
+    case $ID in
+        ubuntu|debian)
+            for pkg in "$@"; do
+                if ! dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'; then
+                    missing+=("$pkg")
+                    log_message "WARNING" "Package $pkg not properly installed"
+                fi
+            done
+            ;;
+        fedora|centos|rocky|almalinux)
+            for pkg in "$@"; do
+                if ! rpm -q "$pkg" >/dev/null 2>&1; then
+                    missing+=("$pkg")
+                    log_message "WARNING" "Package $pkg not properly installed"
+                fi
+            done
+            ;;
+    esac
+    
     if [[ ${#missing[@]} -gt 0 ]]; then
-        log_message "ERROR" "Failed to install: ${missing[*]}"
+        log_message "ERROR" "Missing packages after installation: ${missing[*]}"
         return 1
     fi
     
@@ -257,7 +313,7 @@ function validate_ip() {
     return 1
 }
 
-# Add new function for network interface validation
+# Network interface validation
 function validate_interface() {
     local interface="$1"
     
@@ -274,7 +330,7 @@ function validate_interface() {
     return 0
 }
 
-# Add new function for port validation
+# Port validation with availability check
 function validate_port() {
     local port="$1"
     
@@ -291,7 +347,7 @@ function validate_port() {
     return 0
 }
 
-# Add new function for CIDR validation
+# CIDR validation
 function validate_cidr() {
     local cidr="$1"
     local ip_part
@@ -319,6 +375,7 @@ init_directories
 export -f log_message
 export -f validate_system
 export -f install_dependencies
+export -f verify_package_installation
 export -f check_dependencies
 export -f generate_keys
 export -f validate_ip
