@@ -222,7 +222,8 @@ function verify_package_installation() {
 
 # Enhanced dependency checking with version verification
 function check_dependencies() {
-    local deps=("wg" "ip" "iptables" "systemctl" "qrencode")
+    # Changed from checking for 'wireguard' to checking for 'wg'
+    local deps=("wg" "wg-quick" "ip" "iptables" "systemctl" "qrencode")
     local missing=()
     
     for dep in "${deps[@]}"; do
