@@ -12,12 +12,11 @@ source "${SCRIPT_DIR}/batch-operations.sh"
 
 # Configure VPN mode selection
 function configure_vpn_mode() {
-    echo "Select VPN Mode:"
-    echo "1) Proxy Mode - Route all traffic through VPN (recommended for most users)"
-    echo "2) Split Tunnel Mode - Route only specific networks"
-    
     local mode_choice
     while true; do
+        echo "Select VPN Mode:"
+        echo "1) Proxy Mode - Route all traffic through VPN (recommended for most users)"
+        echo "2) Split Tunnel Mode - Route only specific networks"
         read -rp "Choose mode [1-2]: " mode_choice
         case $mode_choice in
             1) 
@@ -30,6 +29,8 @@ function configure_vpn_mode() {
                 ;;
             *) 
                 echo "Invalid choice. Please select 1 or 2."
+                sleep 1
+                clear
                 ;;
         esac
     done
@@ -111,7 +112,7 @@ function install_wireguard() {
     if ! configure_networking "$interface_name"; then
         log_message "ERROR" "Failed to configure networking"
         return 1
-    }
+    fi
     
     log_message "SUCCESS" "WireGuard installation completed successfully"
     
@@ -173,6 +174,321 @@ function configure_networking() {
     return 0
 }
 
+# Placeholder functions for menu options
+function manage_tunnels() {
+    while true; do
+        echo -e "\nTunnel Management"
+        echo "================="
+        echo "1) Create new tunnel"
+        echo "2) List active tunnels"
+        echo "3) Remove tunnel"
+        echo "4) Show tunnel status"
+        echo "5) Back to main menu"
+        
+        local choice
+        read -rp "Select an option [1-5]: " choice
+        
+        case $choice in
+            1)
+                local tunnel_name port
+                read -rp "Enter tunnel name: " tunnel_name
+                read -rp "Enter port number [51820]: " port
+                port=${port:-51820}
+                
+                if [[ ! $port =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+                    log_message "ERROR" "Invalid port number"
+                    continue
+                fi
+                
+                create_tunnel "$tunnel_name" "$port" || log_message "ERROR" "Failed to create tunnel $tunnel_name"
+                ;;
+            2)
+                list_tunnels
+                read -rp "Press Enter to continue..."
+                ;;
+            3)
+                local tunnel_name
+                read -rp "Enter tunnel name to remove: " tunnel_name
+                remove_tunnel "$tunnel_name" || log_message "ERROR" "Failed to remove tunnel $tunnel_name"
+                ;;
+            4)
+                echo "Active Tunnel Status:"
+                echo "===================="
+                wg show all || log_message "ERROR" "Failed to show tunnel status"
+                read -rp "Press Enter to continue..."
+                ;;
+            5)
+                return 0
+                ;;
+            *)
+                log_message "WARNING" "Invalid option selected: $choice"
+                ;;
+        esac
+    done
+}
+
+function manage_clients() {
+    while true; do
+        echo -e "\nClient Management"
+        echo "================="
+        echo "1) Create new client"
+        echo "2) List clients"
+        echo "3) Remove client"
+        echo "4) Generate QR code"
+        echo "5) Batch operations"
+        echo "6) Back to main menu"
+        
+        local choice
+        read -rp "Select an option [1-6]: " choice
+        
+        case $choice in
+            1)
+                local client_name tunnel_name ip
+                read -rp "Enter client name: " client_name
+                read -rp "Enter tunnel name [wg0]: " tunnel_name
+                tunnel_name=${tunnel_name:-wg0}
+                read -rp "Enter IP address [auto]: " ip
+                ip=${ip:-auto}
+                
+                create_client "$client_name" "$tunnel_name" "$ip" || log_message "ERROR" "Failed to create client $client_name"
+                ;;
+            2)
+                local tunnel_name
+                read -rp "Enter tunnel name [wg0]: " tunnel_name
+                tunnel_name=${tunnel_name:-wg0}
+                list_clients "$tunnel_name"
+                read -rp "Press Enter to continue..."
+                ;;
+            3)
+                local client_name tunnel_name
+                read -rp "Enter client name to remove: " client_name
+                read -rp "Enter tunnel name [wg0]: " tunnel_name
+                tunnel_name=${tunnel_name:-wg0}
+                remove_client "$client_name" "$tunnel_name" || log_message "ERROR" "Failed to remove client $client_name"
+                ;;
+            4)
+                local client_name tunnel_name
+                read -rp "Enter client name: " client_name
+                read -rp "Enter tunnel name [wg0]: " tunnel_name
+                tunnel_name=${tunnel_name:-wg0}
+                generate_qr_code "$client_name" "$tunnel_name" || log_message "ERROR" "Failed to generate QR code for $client_name"
+                ;;
+            5)
+                manage_batch_operations
+                ;;
+            6)
+                return 0
+                ;;
+            *)
+                log_message "WARNING" "Invalid option selected: $choice"
+                ;;
+        esac
+    done
+}
+
+function manage_batch_operations() {
+    while true; do
+        echo -e "\nBatch Operations"
+        echo "================"
+        echo "1) Create batch template"
+        echo "2) Process batch file"
+        echo "3) Back to client management"
+        
+        local choice
+        read -rp "Select an option [1-3]: " choice
+        
+        case $choice in
+            1)
+                create_batch_template || log_message "ERROR" "Failed to create batch template"
+                ;;
+            2)
+                local batch_file tunnel_name
+                read -rp "Enter batch file path: " batch_file
+                read -rp "Enter tunnel name [wg0]: " tunnel_name
+                tunnel_name=${tunnel_name:-wg0}
+                process_batch_clients "$batch_file" "$tunnel_name" || log_message "ERROR" "Failed to process batch file"
+                ;;
+            3)
+                return 0
+                ;;
+            *)
+                log_message "WARNING" "Invalid option selected: $choice"
+                ;;
+        esac
+    done
+}
+
+function system_configuration() {
+    while true; do
+        echo -e "\nSystem Configuration"
+        echo "==================="
+        echo "1) Configure DNS settings"
+        echo "2) Configure NAT settings"
+        echo "3) View system logs"
+        echo "4) Backup configuration"
+        echo "5) Restore configuration"
+        echo "6) Back to main menu"
+        
+        local choice
+        read -rp "Select an option [1-6]: " choice
+        
+        case $choice in
+            1)
+                configure_dns
+                ;;
+            2)
+                configure_nat
+                ;;
+            3)
+                view_logs
+                ;;
+            4)
+                backup_config
+                ;;
+            5)
+                restore_config
+                ;;
+            6)
+                return 0
+                ;;
+            *)
+                log_message "WARNING" "Invalid option selected: $choice"
+                ;;
+        esac
+    done
+}
+
+function configure_dns() {
+    local dns_servers
+    read -rp "Enter DNS servers (comma-separated) [1.1.1.1,1.0.0.1]: " dns_servers
+    dns_servers=${dns_servers:-"1.1.1.1,1.0.0.1"}
+    
+    if ! validate_dns_servers "$dns_servers"; then
+        log_message "ERROR" "Invalid DNS server format"
+        return 1
+    fi
+    
+    # Update DNS settings in WireGuard configuration
+    sed -i "s/DNS = .*/DNS = ${dns_servers}/" /etc/wireguard/*.conf
+    log_message "SUCCESS" "DNS settings updated"
+}
+
+function configure_nat() {
+    echo "NAT Configuration Options:"
+    echo "1) Standard NAT (recommended)"
+    echo "2) Full-cone NAT (gaming/voice chat)"
+    echo "3) Restricted NAT"
+    
+    local choice
+    read -rp "Select NAT type [1]: " choice
+    choice=${choice:-1}
+    
+    case $choice in
+        1)
+            update_nat_rules "standard"
+            ;;
+        2)
+            update_nat_rules "full-cone"
+            ;;
+        3)
+            update_nat_rules "restricted"
+            ;;
+        *)
+            log_message "ERROR" "Invalid NAT type selected"
+            return 1
+            ;;
+    esac
+}
+
+function update_nat_rules() {
+    local nat_type="$1"
+    local interface
+    
+    # Get the primary network interface
+    interface=$(ip route | grep default | awk '{print $5}' | head -n1)
+    
+    case $nat_type in
+        "standard")
+            # Standard NAT configuration
+            local postup="iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o $interface -j MASQUERADE"
+            local postdown="iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o $interface -j MASQUERADE"
+            ;;
+        "full-cone")
+            # Full-cone NAT for gaming
+            local postup="iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -j ACCEPT; iptables -t nat -A POSTROUTING -o $interface -j MASQUERADE; iptables -t nat -A PREROUTING -i $interface -j ACCEPT"
+            local postdown="iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -j ACCEPT; iptables -t nat -D POSTROUTING -o $interface -j MASQUERADE; iptables -t nat -D PREROUTING -i $interface -j ACCEPT"
+            ;;
+        "restricted")
+            # Restricted NAT
+            local postup="iptables -A FORWARD -i %i -j ACCEPT; iptables -A FORWARD -o %i -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -A POSTROUTING -o $interface -j MASQUERADE"
+            local postdown="iptables -D FORWARD -i %i -j ACCEPT; iptables -D FORWARD -o %i -m state --state RELATED,ESTABLISHED -j ACCEPT; iptables -t nat -D POSTROUTING -o $interface -j MASQUERADE"
+            ;;
+    esac
+    
+    # Update all WireGuard configurations with new NAT rules
+    for conf in /etc/wireguard/*.conf; do
+        sed -i "/^PostUp/c\\PostUp = $postup" "$conf"
+        sed -i "/^PostDown/c\\PostDown = $postdown" "$conf"
+    done
+    
+    log_message "SUCCESS" "NAT rules updated to $nat_type mode"
+    return 0
+}
+
+function view_logs() {
+    if [[ -f "$WG_LOG_DIR/wg-core.log" ]]; then
+        tail -n 50 "$WG_LOG_DIR/wg-core.log"
+    else
+        log_message "WARNING" "No logs found"
+    fi
+    read -rp "Press Enter to continue..."
+}
+
+function backup_config() {
+    local backup_dir="$WG_BACKUP_DIR/backup_$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+    
+    # Backup all configuration files and keys
+    cp -r /etc/wireguard/* "$backup_dir/"
+    
+    # Create archive
+    tar -czf "$backup_dir.tar.gz" -C "$(dirname "$backup_dir")" "$(basename "$backup_dir")"
+    rm -rf "$backup_dir"
+    
+    log_message "SUCCESS" "Backup created: $backup_dir.tar.gz"
+}
+
+function restore_config() {
+    local backup_file
+    read -rp "Enter backup file path: " backup_file
+    
+    if [[ ! -f "$backup_file" ]]; then
+        log_message "ERROR" "Backup file not found"
+        return 1
+    fi
+    
+    # Stop WireGuard services
+    systemctl stop wg-quick@*
+    
+    # Create temporary directory
+    local temp_dir
+    temp_dir=$(mktemp -d)
+    
+    # Extract backup
+    tar -xzf "$backup_file" -C "$temp_dir"
+    
+    # Restore configuration
+    cp -r "$temp_dir"/*/* /etc/wireguard/
+    
+    # Cleanup
+    rm -rf "$temp_dir"
+    
+    # Restart WireGuard services
+    systemctl start wg-quick@*
+    
+    log_message "SUCCESS" "Configuration restored from $backup_file"
+}
+
 # Main menu
 function show_main_menu() {
     while true; do
@@ -188,15 +504,25 @@ function show_main_menu() {
         read -rp "Select an option [1-5]: " choice
         
         case $choice in
-            1) install_wireguard ;;
-            2) manage_tunnels ;;
-            3) manage_clients ;;
-            4) system_configuration ;;
-            5) exit 0 ;;
-            *) echo "Invalid option. Please try again." ;;
+            1) install_wireguard || log_message "ERROR" "WireGuard installation failed" ;;
+            2) manage_tunnels || log_message "ERROR" "Tunnel management failed" ;;
+            3) manage_clients || log_message "ERROR" "Client management failed" ;;
+            4) system_configuration || log_message "ERROR" "System configuration failed" ;;
+            5) log_message "INFO" "Exiting WireGuard management system"; exit 0 ;;
+            *) log_message "WARNING" "Invalid option selected: $choice" ;;
         esac
     done
 }
+
+# Cleanup function for graceful exit
+function cleanup() {
+    log_message "INFO" "Performing cleanup before exit"
+    # Add cleanup tasks here
+    exit 0
+}
+
+# Set up trap for cleanup on script exit
+trap cleanup EXIT
 
 # Initialize the environment and start the script
 validate_system

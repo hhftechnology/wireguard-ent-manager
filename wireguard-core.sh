@@ -2,6 +2,7 @@
 
 # WireGuard Core Module (wireguard-core.sh)
 # This module provides core functionality for WireGuard VPN management
+# It includes essential functions used across all other modules
 
 # Standard color codes for script output
 RED='\033[0;31m'
@@ -15,30 +16,54 @@ WG_KEY_DIR="${WG_CONFIG_DIR}/keys"
 WG_LOG_DIR="/var/log/wireguard"
 WG_BACKUP_DIR="/var/backup/wireguard"
 
-# Initialize directories
+# Default network settings
+DEFAULT_SERVER_PORT=51820
+DEFAULT_MTU=1420
+DEFAULT_KEEPALIVE=25
+
+# Initialize all required directories
 function init_directories() {
-    local dirs=("$WG_CONFIG_DIR" "$WG_KEY_DIR" "$WG_LOG_DIR" "$WG_BACKUP_DIR")
+    local dirs=(
+        "$WG_CONFIG_DIR"
+        "$WG_KEY_DIR"
+        "$WG_LOG_DIR"
+        "$WG_BACKUP_DIR"
+        "$WG_CONFIG_DIR/clients"
+        "$WG_CONFIG_DIR/peers"
+        "$WG_CONFIG_DIR/templates"
+    )
+    
     for dir in "${dirs[@]}"; do
         if [[ ! -d "$dir" ]]; then
             mkdir -p "$dir"
             chmod 700 "$dir"
+            log_message "INFO" "Created directory: $dir"
         fi
     done
 }
 
-# Log messages with timestamp
+# Enhanced logging function with timestamps and log rotation
 function log_message() {
     local level="$1"
     local message="$2"
     local timestamp
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local log_file="$WG_LOG_DIR/wg-core.log"
     
     # Create log directory if it doesn't exist
     [[ ! -d "$WG_LOG_DIR" ]] && mkdir -p "$WG_LOG_DIR"
     
-    echo "[$timestamp] [$level] $message" >> "$WG_LOG_DIR/wg-core.log"
+    # Implement log rotation if file exceeds 10MB
+    if [[ -f "$log_file" ]] && [[ $(stat -f%z "$log_file" 2>/dev/null || stat -c%s "$log_file" 2>/dev/null) -gt 10485760 ]]; then
+        mv "$log_file" "$log_file.old"
+        touch "$log_file"
+        chmod 600 "$log_file"
+    fi
     
-    # Display to console with color
+    # Write to log file
+    echo "[$timestamp] [$level] $message" >> "$log_file"
+    
+    # Display to console with color based on level
     case "$level" in
         "ERROR")   echo -e "${RED}Error: $message${NC}" ;;
         "WARNING") echo -e "${YELLOW}Warning: $message${NC}" ;;
@@ -47,20 +72,32 @@ function log_message() {
     esac
 }
 
-# Validate system requirements
+# Enhanced system validation with detailed checks
 function validate_system() {
     # Check if running as root
     if [[ $EUID -ne 0 ]]; then
         log_message "ERROR" "This script must be run as root"
         exit 1
     fi
-
-    # Check OS compatibility
+    
+    # Check OS compatibility and gather system information
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
         case $ID in
-            ubuntu|debian|fedora|centos|rocky|almalinux)
-                log_message "SUCCESS" "Operating system $ID is supported"
+            ubuntu|debian)
+                if [[ ${VERSION_ID%%.*} -lt 20 ]]; then
+                    log_message "WARNING" "This system may have limited compatibility. Minimum recommended Ubuntu/Debian version is 20.04"
+                fi
+                ;;
+            fedora)
+                if [[ $VERSION_ID -lt 32 ]]; then
+                    log_message "WARNING" "This system may have limited compatibility. Minimum recommended Fedora version is 32"
+                fi
+                ;;
+            centos|rocky|almalinux)
+                if [[ ${VERSION_ID%%.*} -lt 8 ]]; then
+                    log_message "WARNING" "This system may have limited compatibility. Minimum recommended version is 8"
+                fi
                 ;;
             *)
                 log_message "WARNING" "Operating system $ID might not be fully supported"
@@ -70,33 +107,66 @@ function validate_system() {
         log_message "ERROR" "Cannot determine OS type"
         exit 1
     fi
+    
+    # Check system resources
+    local mem_total
+    mem_total=$(awk '/MemTotal/ {print $2}' /proc/meminfo)
+    if [[ $mem_total -lt 524288 ]]; then  # Less than 512MB
+        log_message "WARNING" "System has less than recommended memory (512MB)"
+    fi
+    
+    # Check for required kernel modules
+    if ! lsmod | grep -q "wireguard"; then
+        log_message "WARNING" "WireGuard kernel module not loaded"
+        modprobe wireguard || log_message "ERROR" "Failed to load WireGuard kernel module"
+    fi
 }
 
-# Install required packages
+# Enhanced dependency installation with version checking
 function install_dependencies() {
     source /etc/os-release
+    local packages=()
+    
     case $ID in
         ubuntu|debian)
             apt-get update
-            apt-get install -y wireguard wireguard-tools iptables qrencode
+            packages=("wireguard" "wireguard-tools" "iptables" "qrencode")
+            apt-get install -y "${packages[@]}"
             ;;
         fedora)
-            dnf install -y wireguard-tools iptables qrencode
+            packages=("wireguard-tools" "iptables" "qrencode")
+            dnf install -y "${packages[@]}"
             ;;
         centos|rocky|almalinux)
             dnf install -y epel-release
-            dnf install -y wireguard-tools iptables qrencode
+            packages=("wireguard-tools" "iptables" "qrencode")
+            dnf install -y "${packages[@]}"
             ;;
         *)
             log_message "ERROR" "Unsupported package manager"
             return 1
             ;;
     esac
+    
+    # Verify installations
+    local missing=()
+    for pkg in "${packages[@]}"; do
+        if ! command -v "$pkg" &>/dev/null; then
+            missing+=("$pkg")
+        fi
+    done
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log_message "ERROR" "Failed to install: ${missing[*]}"
+        return 1
+    fi
+    
+    return 0
 }
 
-# Check if required commands are available
+# Enhanced dependency checking with version verification
 function check_dependencies() {
-    local deps=("wg" "ip" "iptables" "systemctl")
+    local deps=("wg" "ip" "iptables" "systemctl" "qrencode")
     local missing=()
     
     for dep in "${deps[@]}"; do
@@ -104,6 +174,13 @@ function check_dependencies() {
             missing+=("$dep")
         fi
     done
+    
+    # Check versions of critical components
+    if command -v wg &>/dev/null; then
+        local wg_version
+        wg_version=$(wg --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' || echo "unknown")
+        log_message "INFO" "WireGuard Tools version: $wg_version"
+    fi
     
     if [[ ${#missing[@]} -gt 0 ]]; then
         log_message "ERROR" "Missing required dependencies: ${missing[*]}"
@@ -114,36 +191,128 @@ function check_dependencies() {
     return 0
 }
 
-# Generate WireGuard keys
+# Enhanced key generation with stronger entropy and validation
 function generate_keys() {
     local name="$1"
     local key_dir="$WG_KEY_DIR/$name"
     
+    # Ensure sufficient entropy
+    if [[ $(cat /proc/sys/kernel/random/entropy_avail) -lt 2000 ]]; then
+        log_message "WARNING" "Low entropy available. This might slow down key generation"
+    fi
+    
     mkdir -p "$key_dir"
     chmod 700 "$key_dir"
     
-    wg genkey | tee "$key_dir/private.key" | wg pubkey > "$key_dir/public.key"
+    # Generate private key with extra safety checks
+    if ! wg genkey | tee "$key_dir/private.key" >/dev/null; then
+        log_message "ERROR" "Failed to generate private key for $name"
+        return 1
+    fi
     chmod 600 "$key_dir/private.key"
+    
+    # Generate public key
+    if ! wg pubkey < "$key_dir/private.key" > "$key_dir/public.key"; then
+        log_message "ERROR" "Failed to generate public key for $name"
+        return 1
+    fi
     chmod 644 "$key_dir/public.key"
     
+    # Validate key generation
     if [[ ! -s "$key_dir/private.key" ]] || [[ ! -s "$key_dir/public.key" ]]; then
-        log_message "ERROR" "Failed to generate keys for $name"
+        log_message "ERROR" "Key validation failed for $name"
+        return 1
+    fi
+    
+    log_message "SUCCESS" "Generated keys for $name"
+    return 0
+}
+
+# Enhanced IP address validation with IPv6 support
+function validate_ip() {
+    local ip="$1"
+    local ip_type="$2"  # Optional: 'v4' or 'v6'
+    
+    # Handle IPv4
+    if [[ -z "$ip_type" ]] || [[ "$ip_type" == "v4" ]]; then
+        if [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]]; then
+            local IFS='.'
+            read -ra ADDR <<< "$ip"
+            for i in "${ADDR[@]}"; do
+                if [[ $i -lt 0 ]] || [[ $i -gt 255 ]]; then
+                    return 1
+                fi
+            done
+            return 0
+        fi
+    fi
+    
+    # Handle IPv6
+    if [[ -z "$ip_type" ]] || [[ "$ip_type" == "v6" ]]; then
+        if [[ $ip =~ ^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$ ]]; then
+            return 0
+        fi
+    fi
+    
+    return 1
+}
+
+# Add new function for network interface validation
+function validate_interface() {
+    local interface="$1"
+    
+    # Check if interface exists
+    if ! ip link show "$interface" &>/dev/null; then
+        return 1
+    fi
+    
+    # Check if interface is up
+    if ! ip link show "$interface" | grep -q "UP"; then
+        log_message "WARNING" "Interface $interface is down"
+    fi
+    
+    return 0
+}
+
+# Add new function for port validation
+function validate_port() {
+    local port="$1"
+    
+    # Check if port is a number and within valid range
+    if [[ ! $port =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        return 1
+    fi
+    
+    # Check if port is already in use
+    if netstat -tuln | grep -q ":$port "; then
         return 1
     fi
     
     return 0
 }
 
-# Validate IP address format
-function validate_ip() {
-    local ip="$1"
-    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
-        return 0
+# Add new function for CIDR validation
+function validate_cidr() {
+    local cidr="$1"
+    local ip_part
+    local mask_part
+    
+    IFS='/' read -r ip_part mask_part <<< "$cidr"
+    
+    # Validate IP part
+    if ! validate_ip "$ip_part"; then
+        return 1
     fi
-    return 1
+    
+    # Validate mask part
+    if [[ ! $mask_part =~ ^[0-9]+$ ]] || [ "$mask_part" -lt 0 ] || [ "$mask_part" -gt 32 ]; then
+        return 1
+    fi
+    
+    return 0
 }
 
-# Initialize the environment
+# Initialize directories
 init_directories
 
 # Export functions
@@ -153,3 +322,6 @@ export -f install_dependencies
 export -f check_dependencies
 export -f generate_keys
 export -f validate_ip
+export -f validate_interface
+export -f validate_port
+export -f validate_cidr
