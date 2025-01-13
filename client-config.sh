@@ -137,14 +137,20 @@ function create_client_config() {
     
     local config_file="$CLIENT_CONFIG_DIR/${client_name}_${tunnel_name}.conf"
     local priv_key_file="$WG_KEY_DIR/$client_name/private.key"
-    local server_pub_key_file="$WG_KEY_DIR/$tunnel_name/public.key"
+    local server_pub_key_file="$SERVER_KEY_DIR/public.key"  # Updated path
     
-    # Read keys with validation
-    if [[ ! -f "$priv_key_file" ]] || [[ ! -f "$server_pub_key_file" ]]; then
-        log_message "ERROR" "Missing key files for client configuration"
+    # Validate key files exist
+    if [[ ! -f "$priv_key_file" ]]; then
+        log_message "ERROR" "Client private key not found: $priv_key_file"
         return 1
     fi
     
+    if [[ ! -f "$server_pub_key_file" ]]; then
+        log_message "ERROR" "Server public key not found: $server_pub_key_file"
+        return 1
+    fi
+    
+    # Read keys
     local priv_key
     priv_key=$(cat "$priv_key_file")
     local server_pub_key

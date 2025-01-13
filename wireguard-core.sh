@@ -15,6 +15,7 @@ WG_CONFIG_DIR="/etc/wireguard"
 WG_KEY_DIR="${WG_CONFIG_DIR}/keys"
 WG_LOG_DIR="/var/log/wireguard"
 WG_BACKUP_DIR="/var/backup/wireguard"
+SERVER_KEY_DIR="${WG_KEY_DIR}/server"
 
 # Default network settings
 DEFAULT_SERVER_PORT=51820
