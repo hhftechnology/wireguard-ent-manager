@@ -120,7 +120,10 @@ function install_wireguard() {
     local create_client
     read -rp "Would you like to create your first client now? [y/N] " create_client
     if [[ ${create_client,,} == "y" ]]; then
-        create_new_client
+        local client_name
+        read -rp "Enter client name: " client_name
+        # Use the existing create_client function with default values
+        create_client "$client_name" "wg0" "auto" || log_message "ERROR" "Failed to create first client"
     fi
     
     return 0
