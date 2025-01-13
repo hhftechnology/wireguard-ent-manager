@@ -195,25 +195,31 @@ function verify_package_installation() {
     
     case $ID in
         ubuntu|debian)
-            for pkg in "$@"; do
-                if ! dpkg -l "$pkg" 2>/dev/null | grep -q '^ii'; then
-                    missing+=("$pkg")
-                    log_message "WARNING" "Package $pkg not properly installed"
-                fi
-            done
+            # Check for actual command-line tools instead of package names
+            if ! command -v wg &>/dev/null; then
+                missing+=("wg")
+                log_message "WARNING" "WireGuard command-line tool not found"
+            fi
+            if ! command -v wg-quick &>/dev/null; then
+                missing+=("wg-quick")
+                log_message "WARNING" "WireGuard quick setup tool not found"
+            fi
             ;;
         fedora|centos|rocky|almalinux)
-            for pkg in "$@"; do
-                if ! rpm -q "$pkg" >/dev/null 2>&1; then
-                    missing+=("$pkg")
-                    log_message "WARNING" "Package $pkg not properly installed"
-                fi
-            done
+            # Similar checks for RPM-based systems
+            if ! command -v wg &>/dev/null; then
+                missing+=("wg")
+                log_message "WARNING" "WireGuard command-line tool not found"
+            fi
+            if ! command -v wg-quick &>/dev/null; then
+                missing+=("wg-quick")
+                log_message "WARNING" "WireGuard quick setup tool not found"
+            fi
             ;;
     esac
     
     if [[ ${#missing[@]} -gt 0 ]]; then
-        log_message "ERROR" "Missing packages after installation: ${missing[*]}"
+        log_message "ERROR" "Missing required WireGuard tools after installation: ${missing[*]}"
         return 1
     fi
     
