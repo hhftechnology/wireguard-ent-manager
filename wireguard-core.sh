@@ -1,12 +1,7 @@
 #!/bin/bash
 
 # WireGuard Core Module (wireguard-core.sh)
-# This module provides core functionality for WireGuard VPN management including:
-# - System checks and validation
-# - Installation and dependency management
-# - Core configuration functions
-# - Security implementation
-# - Network interface management
+# This module provides core functionality for WireGuard VPN management
 
 # Standard color codes for script output
 RED='\033[0;31m'
@@ -20,188 +15,118 @@ WG_KEY_DIR="${WG_CONFIG_DIR}/keys"
 WG_LOG_DIR="/var/log/wireguard"
 WG_BACKUP_DIR="/var/backup/wireguard"
 
-# Default configuration values
-DEFAULT_PORT=51820
-DEFAULT_MTU=1420
-DEFAULT_KEEPALIVE=25
-DEFAULT_DNS="1.1.1.1,1.0.0.1"
-DEFAULT_ALLOWED_IPS="0.0.0.0/0,::/0"
+# Initialize directories
+function init_directories() {
+    local dirs=("$WG_CONFIG_DIR" "$WG_KEY_DIR" "$WG_LOG_DIR" "$WG_BACKUP_DIR")
+    for dir in "${dirs[@]}"; do
+        if [[ ! -d "$dir" ]]; then
+            mkdir -p "$dir"
+            chmod 700 "$dir"
+        fi
+    done
+}
 
-#######################
-# Validation Functions
-#######################
-
-function validate_system() {
-    # Check system requirements and compatibility
-    local os_supported=0
-    local os_name
-    local os_version
+# Log messages with timestamp
+function log_message() {
+    local level="$1"
+    local message="$2"
+    local timestamp
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     
-    # Load OS information
-    if [ -f /etc/os-release ]; then
+    # Create log directory if it doesn't exist
+    [[ ! -d "$WG_LOG_DIR" ]] && mkdir -p "$WG_LOG_DIR"
+    
+    echo "[$timestamp] [$level] $message" >> "$WG_LOG_DIR/wg-core.log"
+    
+    # Display to console with color
+    case "$level" in
+        "ERROR")   echo -e "${RED}Error: $message${NC}" ;;
+        "WARNING") echo -e "${YELLOW}Warning: $message${NC}" ;;
+        "SUCCESS") echo -e "${GREEN}$message${NC}" ;;
+        *)         echo "$message" ;;
+    esac
+}
+
+# Validate system requirements
+function validate_system() {
+    # Check if running as root
+    if [[ $EUID -ne 0 ]]; then
+        log_message "ERROR" "This script must be run as root"
+        exit 1
+    fi
+
+    # Check OS compatibility
+    if [[ -f /etc/os-release ]]; then
         source /etc/os-release
-        os_name=$ID
-        os_version=$VERSION_ID
+        case $ID in
+            ubuntu|debian|fedora|centos|rocky|almalinux)
+                log_message "SUCCESS" "Operating system $ID is supported"
+                ;;
+            *)
+                log_message "WARNING" "Operating system $ID might not be fully supported"
+                ;;
+        esac
     else
         log_message "ERROR" "Cannot determine OS type"
-        return 1
+        exit 1
     fi
-    
-    # Validate supported OS and versions
-    case $os_name in
-        ubuntu)
-            if [[ $(echo "$os_version >= 20.04" | bc) -eq 1 ]]; then
-                os_supported=1
-            fi
-            ;;
-        debian)
-            if [[ $(echo "$os_version >= 11" | bc) -eq 1 ]]; then
-                os_supported=1
-            fi
-            ;;
-        fedora)
-            if [[ $os_version -ge 35 ]]; then
-                os_supported=1
-            fi
-            ;;
-        centos|rocky|almalinux)
-            if [[ $os_version =~ ^8 ]]; then
-                os_supported=1
-            fi
-            ;;
-        *)
-            log_message "WARNING" "Untested operating system: $os_name"
-            ;;
-    esac
-    
-    [[ $os_supported -eq 0 ]] && {
-        log_message "ERROR" "Unsupported operating system: $os_name $os_version"
-        return 1
-    }
-    
-    return 0
 }
 
-function validate_network_interface() {
-    local interface=$1
-    
-    # Check if interface exists
-    if ! ip link show "$interface" &>/dev/null; then
-        log_message "ERROR" "Interface $interface does not exist"
-        return 1
-    fi
-    
-    # Check if interface is up
-    if ! ip link show "$interface" | grep -q "UP"; then
-        log_message "WARNING" "Interface $interface is down"
-        return 1
-    }
-    
-    return 0
-}
-
-function validate_port() {
-    local port=$1
-    
-    # Check if port is a number
-    if ! [[ $port =~ ^[0-9]+$ ]]; then
-        log_message "ERROR" "Invalid port number: $port"
-        return 1
-    fi
-    
-    # Check if port is in valid range
-    if [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
-        log_message "ERROR" "Port must be between 1 and 65535"
-        return 1
-    fi
-    
-    # Check if port is already in use
-    if netstat -tuln | grep -q ":$port "; then
-        log_message "ERROR" "Port $port is already in use"
-        return 1
-    fi
-    
-    return 0
-}
-
-#######################
-# Installation Functions
-#######################
-
+# Install required packages
 function install_dependencies() {
-    local os_name
     source /etc/os-release
-    os_name=$ID
-    
-    log_message "INFO" "Installing required dependencies for $os_name"
-    
-    case $os_name in
+    case $ID in
         ubuntu|debian)
             apt-get update
-            apt-get install -y \
-                wireguard \
-                wireguard-tools \
-                iptables \
-                qrencode \
-                bc \
-                net-tools
+            apt-get install -y wireguard wireguard-tools iptables qrencode
             ;;
         fedora)
-            dnf install -y \
-                wireguard-tools \
-                iptables \
-                qrencode \
-                bc \
-                net-tools
+            dnf install -y wireguard-tools iptables qrencode
             ;;
         centos|rocky|almalinux)
             dnf install -y epel-release
-            dnf install -y \
-                wireguard-tools \
-                iptables \
-                qrencode \
-                bc \
-                net-tools
+            dnf install -y wireguard-tools iptables qrencode
             ;;
         *)
             log_message "ERROR" "Unsupported package manager"
             return 1
             ;;
     esac
+}
+
+# Check if required commands are available
+function check_dependencies() {
+    local deps=("wg" "ip" "iptables" "systemctl")
+    local missing=()
     
-    # Verify installation
-    local required_packages=("wg" "iptables" "qrencode")
-    for package in "${required_packages[@]}"; do
-        if ! command -v "$package" &>/dev/null; then
-            log_message "ERROR" "Failed to install $package"
-            return 1
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" &>/dev/null; then
+            missing+=("$dep")
         fi
     done
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        log_message "ERROR" "Missing required dependencies: ${missing[*]}"
+        install_dependencies
+        return 1
+    fi
     
     return 0
 }
 
-#######################
-# Security Functions
-#######################
-
+# Generate WireGuard keys
 function generate_keys() {
-    local name=$1
-    local key_path="${WG_KEY_DIR}/${name}"
+    local name="$1"
+    local key_dir="$WG_KEY_DIR/$name"
     
-    # Create keys directory if it doesn't exist
-    mkdir -p "$WG_KEY_DIR"
-    chmod 700 "$WG_KEY_DIR"
+    mkdir -p "$key_dir"
+    chmod 700 "$key_dir"
     
-    # Generate private key
-    wg genkey | tee "${key_path}.private" | wg pubkey > "${key_path}.public"
+    wg genkey | tee "$key_dir/private.key" | wg pubkey > "$key_dir/public.key"
+    chmod 600 "$key_dir/private.key"
+    chmod 644 "$key_dir/public.key"
     
-    # Set proper permissions
-    chmod 600 "${key_path}.private"
-    chmod 644 "${key_path}.public"
-    
-    # Verify key generation
-    if [[ ! -s "${key_path}.private" ]] || [[ ! -s "${key_path}.public" ]]; then
+    if [[ ! -s "$key_dir/private.key" ]] || [[ ! -s "$key_dir/public.key" ]]; then
         log_message "ERROR" "Failed to generate keys for $name"
         return 1
     fi
@@ -209,124 +134,22 @@ function generate_keys() {
     return 0
 }
 
-function secure_configuration() {
-    # Secure WireGuard configuration directory
-    chmod 700 "$WG_CONFIG_DIR"
-    chmod 600 "$WG_CONFIG_DIR"/*
-    
-    # Ensure proper ownership
-    chown -R root:root "$WG_CONFIG_DIR"
-    
-    # Set up kernel parameters for security
-    cat > /etc/sysctl.d/99-wireguard.conf << EOF
-net.ipv4.ip_forward = 1
-net.ipv6.conf.all.forwarding = 1
-net.ipv4.conf.all.rp_filter = 2
-net.ipv4.conf.default.rp_filter = 2
-EOF
-    
-    sysctl --system
-}
-
-#######################
-# Network Functions
-#######################
-
-function configure_network() {
-    local interface=$1
-    local subnet=$2
-    
-    # Configure IP forwarding
-    echo "net.ipv4.ip_forward = 1" > /etc/sysctl.d/99-wireguard.conf
-    echo "net.ipv6.conf.all.forwarding = 1" >> /etc/sysctl.d/99-wireguard.conf
-    sysctl --system
-    
-    # Set up NAT
-    iptables -t nat -A POSTROUTING -s "$subnet" -o "$interface" -j MASQUERADE
-    iptables-save > /etc/iptables/rules.v4
-    
-    # Configure interface
-    ip link set dev "$interface" up
-    
-    # Verify configuration
-    if ! ip addr show "$interface" | grep -q "$subnet"; then
-        log_message "ERROR" "Failed to configure network interface"
-        return 1
+# Validate IP address format
+function validate_ip() {
+    local ip="$1"
+    if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; then
+        return 0
     fi
-    
-    return 0
+    return 1
 }
 
-function configure_firewall() {
-    local port=$1
-    local interface=$2
-    
-    # Detect firewall type
-    if command -v ufw &>/dev/null; then
-        configure_ufw "$port" "$interface"
-    elif command -v firewall-cmd &>/dev/null; then
-        configure_firewalld "$port" "$interface"
-    else
-        configure_iptables "$port" "$interface"
-    fi
-}
+# Initialize the environment
+init_directories
 
-#######################
-# Utility Functions
-#######################
-
-function backup_configuration() {
-    local backup_name="wg-backup-$(date +%Y%m%d-%H%M%S)"
-    local backup_path="${WG_BACKUP_DIR}/${backup_name}"
-    
-    # Create backup directory
-    mkdir -p "$WG_BACKUP_DIR"
-    
-    # Create backup archive
-    tar czf "${backup_path}.tar.gz" -C / etc/wireguard/
-    
-    # Encrypt backup if gpg is available
-    if command -v gpg &>/dev/null; then
-        gpg --symmetric "${backup_path}.tar.gz"
-        rm "${backup_path}.tar.gz"
-        log_message "SUCCESS" "Encrypted backup created: ${backup_path}.tar.gz.gpg"
-    else
-        log_message "SUCCESS" "Backup created: ${backup_path}.tar.gz"
-    fi
-}
-
-function log_message() {
-    local level=$1
-    local message=$2
-    local timestamp
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    
-    echo "[$timestamp] [$level] $message" >> "$WG_LOG_DIR/wg-core.log"
-    
-    case $level in
-        ERROR)
-            echo -e "${RED}Error: $message${NC}" >&2
-            ;;
-        WARNING)
-            echo -e "${YELLOW}Warning: $message${NC}" >&2
-            ;;
-        SUCCESS)
-            echo -e "${GREEN}$message${NC}"
-            ;;
-        *)
-            echo "$message"
-            ;;
-    esac
-}
-
-# Export functions for use in other modules
-export -f validate_system
-export -f validate_network_interface
-export -f validate_port
-export -f install_dependencies
-export -f generate_keys
-export -f secure_configuration
-export -f configure_network
-export -f configure_firewall
-export -f backup_configuration
+# Export functions
 export -f log_message
+export -f validate_system
+export -f install_dependencies
+export -f check_dependencies
+export -f generate_keys
+export -f validate_ip

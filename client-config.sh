@@ -1,259 +1,71 @@
 #!/bin/bash
 
 # WireGuard Client Configuration Module (client-config.sh)
-# This module handles all client-related operations including:
-# - Client creation and management
-# - Key generation and management
-# - Configuration file generation
-# - QR code generation for mobile clients
-# - Batch operations for multiple clients
 
-# Import required core functions
-source "./wireguard-core.sh"
+# Import core functions - using absolute path
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+source "${SCRIPT_DIR}/wireguard-core.sh"
 
-# Configuration Constants
+# Configuration paths
 CLIENT_BASE_DIR="/etc/wireguard/clients"
-CLIENT_TEMPLATE_DIR="/etc/wireguard/templates"
+CLIENT_CONFIG_DIR="/etc/wireguard/configs"
 QR_OUTPUT_DIR="/etc/wireguard/qrcodes"
-MAX_CLIENTS=254  # Maximum number of clients per subnet
 
-# Client IP Management
-declare -A USED_IPS
-declare -A CLIENT_TUNNELS
+# Default values
+DEFAULT_DNS="1.1.1.1,1.0.0.1"
+DEFAULT_ALLOWED_IPS="0.0.0.0/0,::/0"
+DEFAULT_KEEPALIVE=25
 
-#########################
-# Client Creation Functions
-#########################
+# Initialize client directories
+function init_client_dirs() {
+    local dirs=("$CLIENT_BASE_DIR" "$CLIENT_CONFIG_DIR" "$QR_OUTPUT_DIR")
+    for dir in "${dirs[@]}"; do
+        if [[ ! -d "$dir" ]]; then
+            mkdir -p "$dir"
+            chmod 700 "$dir"
+        fi
+    done
+}
 
-function create_new_client() {
-    local client_name=$1
-    local tunnel_name=${2:-wg0}
-    local custom_ip=$3
+# Create a new client
+function create_client() {
+    local client_name="$1"
+    local tunnel_name="${2:-wg0}"
+    local custom_ip="$3"
     
     # Validate client name
     if ! validate_client_name "$client_name"; then
         log_message "ERROR" "Invalid client name: $client_name"
         return 1
-    }
+    fi
     
-    # Create client directories
-    mkdir -p "$CLIENT_BASE_DIR/$client_name"
-    chmod 700 "$CLIENT_BASE_DIR/$client_name"
+    # Create client directory
+    local client_dir="$CLIENT_BASE_DIR/$client_name"
+    mkdir -p "$client_dir"
+    chmod 700 "$client_dir"
     
     # Generate client keys
-    if ! generate_client_keys "$client_name"; then
+    if ! generate_keys "$client_name"; then
         log_message "ERROR" "Failed to generate keys for client: $client_name"
         return 1
-    }
-    
-    # Assign IP address
-    local client_ip
-    if [[ -n $custom_ip ]]; then
-        if ! validate_ip_address "$custom_ip"; then
-            log_message "ERROR" "Invalid custom IP address: $custom_ip"
-            return 1
-        }
-        client_ip=$custom_ip
-    else
-        client_ip=$(assign_client_ip "$tunnel_name")
     fi
     
     # Create client configuration
-    if create_client_config "$client_name" "$client_ip" "$tunnel_name"; then
-        log_message "SUCCESS" "Client $client_name created successfully"
-        generate_qr_code "$client_name"
-        return 0
-    else
+    if ! create_client_config "$client_name" "$custom_ip" "$tunnel_name"; then
         log_message "ERROR" "Failed to create client configuration"
         return 1
     fi
-}
-
-function generate_client_keys() {
-    local client_name=$1
-    local key_dir="$CLIENT_BASE_DIR/$client_name/keys"
     
-    mkdir -p "$key_dir"
-    chmod 700 "$key_dir"
-    
-    # Generate private key
-    wg genkey | tee "$key_dir/private.key" | wg pubkey > "$key_dir/public.key"
-    wg genpsk > "$key_dir/preshared.key"
-    
-    # Set secure permissions
-    chmod 600 "$key_dir/private.key" "$key_dir/preshared.key"
-    chmod 644 "$key_dir/public.key"
-    
-    # Verify key generation
-    if [[ ! -s "$key_dir/private.key" ]] || [[ ! -s "$key_dir/public.key" ]]; then
-        return 1
-    fi
+    log_message "SUCCESS" "Client $client_name created successfully"
     return 0
 }
 
-#########################
-# Configuration Functions
-#########################
-
-function create_client_config() {
-    local client_name=$1
-    local client_ip=$2
-    local tunnel_name=$3
-    local config_dir="$CLIENT_BASE_DIR/$client_name"
-    
-    # Load keys
-    local private_key
-    local public_key
-    local preshared_key
-    private_key=$(cat "$config_dir/keys/private.key")
-    public_key=$(cat "$config_dir/keys/public.key")
-    preshared_key=$(cat "$config_dir/keys/preshared.key")
-    
-    # Get server configuration
-    local server_public_key
-    local server_endpoint
-    local server_port
-    server_public_key=$(get_server_pubkey "$tunnel_name")
-    server_endpoint=$(get_server_endpoint)
-    server_port=$(get_server_port "$tunnel_name")
-    
-    # Create client configuration file
-    cat > "$config_dir/${tunnel_name}.conf" << EOF
-[Interface]
-PrivateKey = ${private_key}
-Address = ${client_ip}/32
-DNS = ${CLIENT_DNS:-$DEFAULT_DNS}
-
-[Peer]
-PublicKey = ${server_public_key}
-PresharedKey = ${preshared_key}
-Endpoint = ${server_endpoint}:${server_port}
-AllowedIPs = ${ALLOWED_IPS:-$DEFAULT_ALLOWED_IPS}
-PersistentKeepalive = ${PERSISTENT_KEEPALIVE:-$DEFAULT_KEEPALIVE}
-EOF
-    
-    chmod 600 "$config_dir/${tunnel_name}.conf"
-    
-    # Add client to server configuration
-    add_client_to_server "$client_name" "$public_key" "$preshared_key" "$client_ip" "$tunnel_name"
-    
-    return 0
-}
-
-function configure_client_dns() {
-    local client_name=$1
-    local tunnel_name=$2
-    
-    echo "Configure DNS for client $client_name"
-    echo "1) Use default DNS (${DEFAULT_DNS})"
-    echo "2) Use custom DNS servers"
-    echo "3) Use split DNS configuration"
-    
-    local choice
-    read -rp "Select DNS configuration [1-3]: " choice
-    
-    case $choice in
-        2)
-            read -rp "Enter primary DNS server: " primary_dns
-            read -rp "Enter secondary DNS server (optional): " secondary_dns
-            if [[ -n $secondary_dns ]]; then
-                CLIENT_DNS="${primary_dns},${secondary_dns}"
-            else
-                CLIENT_DNS="${primary_dns}"
-            fi
-            ;;
-        3)
-            configure_split_dns "$client_name" "$tunnel_name"
-            ;;
-        *)
-            CLIENT_DNS="$DEFAULT_DNS"
-            ;;
-    esac
-}
-
-function configure_split_dns() {
-    local client_name=$1
-    local tunnel_name=$2
-    local config_file="$CLIENT_BASE_DIR/$client_name/${tunnel_name}.conf"
-    
-    echo "Configure Split DNS"
-    echo "Enter domain and DNS server pairs (empty line to finish):"
-    
-    local domains=()
-    local servers=()
-    
-    while true; do
-        read -rp "Domain (or empty to finish): " domain
-        [[ -z $domain ]] && break
-        
-        read -rp "DNS server for $domain: " server
-        domains+=("$domain")
-        servers+=("$server")
-    done
-    
-    # Create split DNS configuration
-    local dns_config=""
-    for i in "${!domains[@]}"; do
-        dns_config+="DNS = ${servers[$i]}"
-        dns_config+="DNSName = ${domains[$i]}"
-    done
-    
-    # Update client configuration
-    sed -i "/\[Interface\]/a ${dns_config}" "$config_file"
-}
-
-#########################
-# Batch Operation Functions
-#########################
-
-function process_batch_file() {
-    local batch_file=$1
-    local tunnel_name=${2:-wg0}
-    local result=0
-    
-    # Validate batch file
-    if ! [[ -f $batch_file ]]; then
-        log_message "ERROR" "Batch file not found: $batch_file"
-        return 1
-    fi
-    
-    # Process each line
-    while IFS=, read -r name ip allowed_ips dns keepalive; do
-        # Skip comments and empty lines
-        [[ $name =~ ^#.*$ || -z $name ]] && continue
-        
-        log_message "INFO" "Processing client: $name"
-        
-        # Set custom variables for this client
-        ALLOWED_IPS="$allowed_ips"
-        CLIENT_DNS="$dns"
-        PERSISTENT_KEEPALIVE="$keepalive"
-        
-        # Create client
-        if ! create_new_client "$name" "$tunnel_name" "$ip"; then
-            log_message "ERROR" "Failed to create client: $name"
-            result=1
-        fi
-        
-    done < "$batch_file"
-    
-    return $result
-}
-
-#########################
-# Utility Functions
-#########################
-
+# Validate client name
 function validate_client_name() {
-    local name=$1
+    local name="$1"
     
-    # Check length
-    if [[ ${#name} -lt 1 || ${#name} -gt 32 ]]; then
-        return 1
-    fi
-    
-    # Check characters
-    if ! [[ $name =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    # Check length and characters
+    if [[ ! $name =~ ^[a-zA-Z0-9_-]{1,32}$ ]]; then
         return 1
     fi
     
@@ -265,47 +77,108 @@ function validate_client_name() {
     return 0
 }
 
-function assign_client_ip() {
-    local tunnel_name=$1
-    local base_ip
-    base_ip=$(get_tunnel_subnet "$tunnel_name")
+# Create client configuration file
+function create_client_config() {
+    local client_name="$1"
+    local client_ip="$2"
+    local tunnel_name="$3"
     
-    # Find next available IP
-    for i in $(seq 2 $MAX_CLIENTS); do
-        local potential_ip="${base_ip%.*}.$i"
-        if ! check_ip_used "$potential_ip"; then
-            mark_ip_used "$potential_ip"
-            echo "$potential_ip"
-            return 0
-        fi
-    done
+    local config_file="$CLIENT_CONFIG_DIR/${client_name}_${tunnel_name}.conf"
+    local priv_key_file="$WG_KEY_DIR/$client_name/private.key"
+    local server_pub_key_file="$WG_KEY_DIR/$tunnel_name/public.key"
     
-    log_message "ERROR" "No available IP addresses"
-    return 1
+    # Read keys
+    local priv_key
+    priv_key=$(cat "$priv_key_file")
+    local server_pub_key
+    server_pub_key=$(cat "$server_pub_key_file")
+    
+    # Generate configuration
+    cat > "$config_file" << EOF
+[Interface]
+PrivateKey = ${priv_key}
+Address = ${client_ip}/32
+DNS = ${DEFAULT_DNS}
+
+[Peer]
+PublicKey = ${server_pub_key}
+AllowedIPs = ${DEFAULT_ALLOWED_IPS}
+PersistentKeepalive = ${DEFAULT_KEEPALIVE}
+EOF
+    
+    chmod 600 "$config_file"
+    return 0
 }
 
+# Generate QR code for client configuration
 function generate_qr_code() {
-    local client_name=$1
-    local config_file="$CLIENT_BASE_DIR/$client_name/wg0.conf"
+    local client_name="$1"
+    local tunnel_name="${2:-wg0}"
+    local config_file="$CLIENT_CONFIG_DIR/${client_name}_${tunnel_name}.conf"
     
-    # Create QR code directory if it doesn't exist
-    mkdir -p "$QR_OUTPUT_DIR"
-    chmod 700 "$QR_OUTPUT_DIR"
-    
-    # Generate QR code if qrencode is available
-    if command -v qrencode >/dev/null 2>&1; then
-        qrencode -t png -o "$QR_OUTPUT_DIR/$client_name.png" < "$config_file"
-        chmod 600 "$QR_OUTPUT_DIR/$client_name.png"
-        log_message "SUCCESS" "QR code generated: $QR_OUTPUT_DIR/$client_name.png"
-        return 0
+    if ! command -v qrencode &>/dev/null; then
+        log_message "ERROR" "qrencode not found"
+        return 1
     fi
     
-    log_message "WARNING" "qrencode not available, skipping QR code generation"
-    return 1
+    if [[ ! -f "$config_file" ]]; then
+        log_message "ERROR" "Configuration file not found"
+        return 1
+    fi
+    
+    qrencode -t png -o "$QR_OUTPUT_DIR/${client_name}.png" < "$config_file"
+    chmod 600 "$QR_OUTPUT_DIR/${client_name}.png"
+    
+    log_message "SUCCESS" "QR code generated for $client_name"
+    return 0
 }
 
+# List all clients
+function list_clients() {
+    local tunnel_name="${1:-wg0}"
+    
+    echo "Active Clients for $tunnel_name:"
+    echo "--------------------------------"
+    
+    if [[ -d "$CLIENT_BASE_DIR" ]]; then
+        for client in "$CLIENT_BASE_DIR"/*; do
+            if [[ -d "$client" ]]; then
+                local client_name
+                client_name=$(basename "$client")
+                echo "- $client_name"
+            fi
+        done
+    else
+        echo "No clients found"
+    fi
+}
+
+# Remove client
+function remove_client() {
+    local client_name="$1"
+    local tunnel_name="${2:-wg0}"
+    
+    # Check if client exists
+    if [[ ! -d "$CLIENT_BASE_DIR/$client_name" ]]; then
+        log_message "ERROR" "Client $client_name not found"
+        return 1
+    fi
+    
+    # Remove client files
+    rm -rf "$CLIENT_BASE_DIR/$client_name"
+    rm -f "$CLIENT_CONFIG_DIR/${client_name}_${tunnel_name}.conf"
+    rm -f "$QR_OUTPUT_DIR/${client_name}.png"
+    
+    log_message "SUCCESS" "Client $client_name removed"
+    return 0
+}
+
+# Initialize directories
+init_client_dirs
+
 # Export functions
-export -f create_new_client
-export -f process_batch_file
+export -f create_client
 export -f validate_client_name
 export -f generate_qr_code
+export -f list_clients
+export -f remove_client
