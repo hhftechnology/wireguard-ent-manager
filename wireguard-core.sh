@@ -136,7 +136,7 @@ function install_dependencies() {
             packages=("wireguard" "wireguard-tools" "iptables" "qrencode")
             if ! DEBIAN_FRONTEND=noninteractive apt-get install -y --fix-missing "${packages[@]}"; then
                 log_message "WARNING" "Initial package installation had issues, verifying installation..."
-                if ! verify_package_installation "${packages[@]}"; then
+                if ! verify_package_installation; then
                     log_message "ERROR" "Failed to verify package installation"
                     return 1
                 fi
@@ -146,7 +146,7 @@ function install_dependencies() {
             packages=("wireguard-tools" "iptables" "qrencode")
             if ! dnf install -y "${packages[@]}"; then
                 log_message "WARNING" "Initial package installation had issues, verifying installation..."
-                if ! verify_package_installation "${packages[@]}"; then
+                if ! verify_package_installation; then
                     log_message "ERROR" "Failed to verify package installation"
                     return 1
                 fi
@@ -160,7 +160,7 @@ function install_dependencies() {
             packages=("wireguard-tools" "iptables" "qrencode")
             if ! dnf install -y "${packages[@]}"; then
                 log_message "WARNING" "Initial package installation had issues, verifying installation..."
-                if ! verify_package_installation "${packages[@]}"; then
+                if ! verify_package_installation; then
                     log_message "ERROR" "Failed to verify package installation"
                     return 1
                 fi
@@ -172,16 +172,18 @@ function install_dependencies() {
             ;;
     esac
     
-    # Verify binary availability as additional safety check
-    local missing_binaries=()
-    for pkg in "${packages[@]}"; do
-        if ! command -v "$pkg" &>/dev/null; then
-            missing_binaries+=("$pkg")
+    # Verify binary availability using the actual tool names
+    local required_tools=("wg" "wg-quick" "iptables" "qrencode")
+    local missing_tools=()
+    
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" &>/dev/null; then
+            missing_tools+=("$tool")
         fi
     done
     
-    if [[ ${#missing_binaries[@]} -gt 0 ]]; then
-        log_message "ERROR" "Required binaries not found after installation: ${missing_binaries[*]}"
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        log_message "ERROR" "Required tools not found after installation: ${missing_tools[*]}"
         return 1
     fi
     
