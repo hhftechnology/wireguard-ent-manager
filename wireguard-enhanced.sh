@@ -492,6 +492,53 @@ function restore_config() {
     log_message "SUCCESS" "Configuration restored from $backup_file"
 }
 
+function manage_enterprise_features() {
+    # Check if enterprise features are installed
+    if [[ ! -f "/usr/local/lib/wireguard/wireguard_enterprise.py" ]]; then
+        echo "Enterprise features are not installed."
+        echo "Would you like to install them now? (y/n)"
+        read -r install_choice
+        if [[ ${install_choice,,} == "y" ]]; then
+            ./setup-enterprise.sh
+        fi
+        return
+    }
+
+    while true; do
+        echo -e "\nEnterprise Management"
+        echo "===================="
+        echo "1) Web Interface Management"
+        echo "2) Monitoring System"
+        echo "3) Container Management"
+        echo "4) Cloud Integration"
+        echo "5) Back to main menu"
+        
+        local choice
+        read -rp "Select an option [1-5]: " choice
+        
+        case $choice in
+            1)
+                python3 /usr/local/lib/wireguard/wireguard_enterprise.py web
+                ;;
+            2)
+                python3 /usr/local/lib/wireguard/wireguard_enterprise.py monitor
+                ;;
+            3)
+                python3 /usr/local/lib/wireguard/wireguard_enterprise.py container
+                ;;
+            4)
+                python3 /usr/local/lib/wireguard/wireguard_enterprise.py cloud
+                ;;
+            5)
+                return 0
+                ;;
+            *)
+                log_message "WARNING" "Invalid option selected: $choice"
+                ;;
+        esac
+    done
+}
+
 # Main menu
 function show_main_menu() {
     while true; do
@@ -501,17 +548,19 @@ function show_main_menu() {
         echo "2) Manage Tunnels"
         echo "3) Manage Clients"
         echo "4) System Configuration"
-        echo "5) Exit"
+        echo "5) Enterprise Features"  # New option
+        echo "6) Exit"
         
         local choice
-        read -rp "Select an option [1-5]: " choice
+        read -rp "Select an option [1-6]: " choice
         
         case $choice in
             1) install_wireguard || log_message "ERROR" "WireGuard installation failed" ;;
             2) manage_tunnels || log_message "ERROR" "Tunnel management failed" ;;
             3) manage_clients || log_message "ERROR" "Client management failed" ;;
             4) system_configuration || log_message "ERROR" "System configuration failed" ;;
-            5) log_message "INFO" "Exiting WireGuard management system"; exit 0 ;;
+            5) manage_enterprise_features || log_message "ERROR" "Enterprise management failed" ;;
+            6) log_message "INFO" "Exiting WireGuard management system"; exit 0 ;;
             *) log_message "WARNING" "Invalid option selected: $choice" ;;
         esac
     done
