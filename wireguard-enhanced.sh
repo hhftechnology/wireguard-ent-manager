@@ -492,6 +492,7 @@ function restore_config() {
     log_message "SUCCESS" "Configuration restored from $backup_file"
 }
 
+# Enterprise features management function
 function manage_enterprise_features() {
     # Check if enterprise features are installed
     if [[ ! -f "/usr/local/lib/wireguard/wireguard_enterprise.py" ]]; then
@@ -502,7 +503,7 @@ function manage_enterprise_features() {
             ./setup-enterprise.sh
         fi
         return
-    }
+    fi  # Changed from } to fi
 
     while true; do
         echo -e "\nEnterprise Management"
@@ -538,7 +539,6 @@ function manage_enterprise_features() {
         esac
     done
 }
-
 # Main menu
 function show_main_menu() {
     while true; do
