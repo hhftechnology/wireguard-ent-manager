@@ -41,7 +41,7 @@ fi
 
 # Create symbolic link for enterprise script
 echo "Creating symbolic links..."
-ln -sf "$ENTERPRISE_DIR/wireguard_enterprise.py" "wg-enterprise"
+ln -sf "$ENTERPRISE_DIR/wireguard_enterprise.py" "enterprise"
 
 # Set up logging directory
 echo "Setting up logging directory..."
