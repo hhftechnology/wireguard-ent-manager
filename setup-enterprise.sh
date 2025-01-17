@@ -55,7 +55,7 @@ chmod 644 "$ENTERPRISE_DIR/config/enterprise-config.yaml"
 
 # Create symbolic link for enterprise script
 echo "Creating symbolic links..."
-ln -sf "$ENTERPRISE_DIR/wireguard_enterprise.py" "$BASE_DIR/wg-enterprise"
+ln -sf "$ENTERPRISE_DIR/wireguard_enterprise.py" "$BASE_DIR/enterprise"
 
 # Set up logging directory
 echo "Setting up logging directory..."
