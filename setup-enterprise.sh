@@ -30,19 +30,19 @@ pip install flask prometheus_client docker kubernetes \
 echo "Installing enterprise components..."
 
 # Web Interface
-cp web_interface.py "$ENTERPRISE_DIR/web/"
+cp enterprise/web/web_interface.py "$ENTERPRISE_DIR/web/"
 chmod 644 "$ENTERPRISE_DIR/web/web_interface.py"
 
 # Monitoring System
-cp monitoring.py "$ENTERPRISE_DIR/monitoring/"
+cp enterprise/monitoring/monitoring.py "$ENTERPRISE_DIR/monitoring/"
 chmod 644 "$ENTERPRISE_DIR/monitoring/monitoring.py"
 
 # Container Integration
-cp container_integration.py "$ENTERPRISE_DIR/container/"
+cp enterprise/container/container_integration.py "$ENTERPRISE_DIR/container/"
 chmod 644 "$ENTERPRISE_DIR/container/container_integration.py"
 
 # Cloud Integration
-cp cloud_integration.py "$ENTERPRISE_DIR/cloud/"
+cp enterprise/cloud/cloud_integration.py "$ENTERPRISE_DIR/cloud/"
 chmod 644 "$ENTERPRISE_DIR/cloud/cloud_integration.py"
 
 # Enterprise Integration
@@ -50,7 +50,7 @@ cp wireguard_enterprise.py "$ENTERPRISE_DIR/"
 chmod 755 "$ENTERPRISE_DIR/wireguard_enterprise.py"
 
 # Configuration
-cp enterprise-config.yaml "$ENTERPRISE_DIR/config/"
+cp enterprise/config/enterprise-config.yaml "$ENTERPRISE_DIR/config/"
 chmod 644 "$ENTERPRISE_DIR/config/enterprise-config.yaml"
 
 # Create symbolic link for enterprise script
