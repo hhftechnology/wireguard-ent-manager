@@ -1,3 +1,4 @@
+# Dont Use Enterprise feature still under development
 # WireGuard Ent Manager (WGEM)
 
 WGEM is a comprehensive management system for WireGuard VPN, designed to simplify the deployment, configuration, and maintenance of WireGuard servers in complex environments. This solution provides an interactive, feature-rich interface for managing multiple WireGuard tunnels, clients, and configurations through an easy-to-use command-line interface.
